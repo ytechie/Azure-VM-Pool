@@ -18,8 +18,7 @@ namespace AzureVmPool
 
         static void Main(string[] args)
         {
-            Task.Run(() => ShowMenu()).Wait();
-            Console.Read();
+            ShowMenu();
         }
 
         private static string LoadCert()
@@ -36,7 +35,7 @@ namespace AzureVmPool
             }
         }
 
-        private static async void ShowMenu()
+        private static void ShowMenu()
         {
             var cert = LoadCert();
             var azure = new AzureOperations(SubscriptionId, cert);
@@ -58,15 +57,20 @@ namespace AzureVmPool
 
                 if (key == '1')
                 {
-                    await azure.CreateCloudServiceIfNotExists(serviceName, Location);
+                    var t = azure.CreateCloudServiceIfNotExists(serviceName, Location);
+                    t.Wait();
                 }
                 if (key == '2')
                 {
-                    await azure.VerifyPool(serviceName);   
+                    var t = azure.VerifyPool(serviceName);
+                    t.Wait();
                 }
                 if (key == '3')
                 {
-                    //TODO
+                    var t = azure.GetVm(serviceName);
+                    t.Wait();
+                    var computerName = t.Result;
+                    Console.WriteLine("Got computer '{0}' from the pool", computerName);
                 }
 
 

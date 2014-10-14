@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
-using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using Microsoft.WindowsAzure;
@@ -16,7 +14,8 @@ namespace AzureVmPool
     {
         private readonly ComputeManagementClient _client;
         private const int MaxPoolSize = 2; //Keeping it small for speed
-        private readonly List<string> _pooledMachineNames = new List<string>(); 
+        private readonly List<string> _pooledMachineNames = new List<string>();
+        private int VmSerial = 1;
 
         public AzureOperations(string subscriptionId, string subscriptionCert)
         {
@@ -42,11 +41,11 @@ namespace AzureVmPool
                     ServiceName = serviceName,
                     Location = location
                 };
-                Console.WriteLine("Creating cloud service...");
+                Console.WriteLine("Creating cloud service '{0}'...", serviceName);
                 var response = await _client.HostedServices.CreateAsync(config);
                 if (response.StatusCode != HttpStatusCode.Created)
                     throw new Exception("Service creation failed with status " + response.StatusCode);
-                Console.WriteLine("Cloud service created");
+                Console.WriteLine("Cloud service created, wait a bit for it to be ready for deployments.");
             }
             else
             {
@@ -58,13 +57,18 @@ namespace AzureVmPool
         {
             for(var i = _pooledMachineNames.Count; i < MaxPoolSize; i++)
             {
-                await CreateVm(serviceName, "PoolVM" + i + 1);
+                VmSerial++;
+                var vmName = "PoolVM" + VmSerial;
+                await CreateVm(serviceName, vmName);
+                _pooledMachineNames.Add(vmName);
+
+                Console.WriteLine("There are now {0} VMs in the pool", _pooledMachineNames.Count);
             }
         }
 
-        private async Task CreateVm(string serviceName, string computerName)
+        private async Task<string> CreateVm(string serviceName, string computerName)
         {
-            var mediaLocation = new Uri("https://jyvhdstorage.blob.core.windows.net/vhds/disk3vhd");
+            var mediaLocation = new Uri("https://jyvhdstorage.blob.core.windows.net/vhds/" + computerName);
             const string deploymentName = "deployment";
 
             DeploymentGetResponse deploymentResponse;
@@ -77,7 +81,6 @@ namespace AzureVmPool
                 deploymentResponse = null;
             }
 
-            var vmCreated = false;
             if (deploymentResponse == null)
             {
                 var createParams = new VirtualMachineCreateDeploymentParameters
@@ -112,7 +115,7 @@ namespace AzureVmPool
 
                                 SourceImageName =
                                     "a699494373c04fc0bc8f2bb1389d6106__Windows-Server-2012-R2-201409.01-en.us-127GB.vhd",
-                                MediaLink = mediaLocation
+                                MediaLink = mediaLocation,
                             }
                         }
                     }
@@ -120,42 +123,57 @@ namespace AzureVmPool
                 Console.WriteLine("Creating deployment. This may take some time...");
                 await _client.VirtualMachines.CreateDeploymentAsync(serviceName, createParams);
                 Console.WriteLine("Deployment Created.");
-                vmCreated = true;
+
+                return computerName;
             }
 
-            if (!vmCreated)
+            var vmParameters = new VirtualMachineCreateParameters
             {
-                var vmParameters = new VirtualMachineCreateParameters
+                RoleSize = "Small",
+                RoleName = "role-" + computerName,
+                ProvisionGuestAgent = true,
+
+
+                ConfigurationSets = new List<ConfigurationSet>
                 {
-                    RoleSize = "Small",
-                    RoleName = "role-" + computerName,
-                    ProvisionGuestAgent = true,
-
-
-                    ConfigurationSets = new List<ConfigurationSet>
+                    new ConfigurationSet
                     {
-                        new ConfigurationSet
-                        {
-                            ComputerName = "cs-" + computerName,
-                            AdminUserName = "admin123",
-                            AdminPassword = "#Fa3aadsfa#R2",
-                            ConfigurationSetType = "WindowsProvisioningConfiguration"
-                        }
-                    },
-                    OSVirtualHardDisk = new OSVirtualHardDisk
-                    {
-
-                        SourceImageName =
-                            "a699494373c04fc0bc8f2bb1389d6106__Windows-Server-2012-R2-201409.01-en.us-127GB.vhd",
-                        MediaLink = mediaLocation
+                        ComputerName = "cs-" + computerName,
+                        AdminUserName = "admin123",
+                        AdminPassword = "#Fa3aadsfa#R2",
+                        ConfigurationSetType = "WindowsProvisioningConfiguration"
                     }
-                };
-                Console.WriteLine("Creating VM " + computerName);
-                await _client.VirtualMachines.CreateAsync(serviceName, deploymentName, vmParameters);
+                },
+                OSVirtualHardDisk = new OSVirtualHardDisk
+                {
+
+                    SourceImageName =
+                        "a699494373c04fc0bc8f2bb1389d6106__Windows-Server-2012-R2-201409.01-en.us-127GB.vhd",
+                    MediaLink = mediaLocation
+                }
+            };
+            Console.WriteLine("Creating VM " + computerName);
+            await _client.VirtualMachines.CreateAsync(serviceName, deploymentName, vmParameters);
+            return computerName;
+        }
+
+        public async Task<string> GetVm(string serviceName)
+        {
+            if (_pooledMachineNames.Count > 0)
+            {
+                var vmFromPool = _pooledMachineNames[0];
+                _pooledMachineNames.Remove(vmFromPool);
+
+                Console.WriteLine("Found machine '{0}' in the pool", vmFromPool);
+
+                return vmFromPool;
             }
-
-
-            //var images = await client.VirtualMachineVMImages.ListAsync();
+            else
+            {
+                VmSerial++;
+                var vmName = await CreateVm(serviceName, "PoolVM" + VmSerial);
+                return vmName;
+            }
         }
     }
 }

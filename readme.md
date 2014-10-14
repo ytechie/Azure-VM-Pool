@@ -2,6 +2,8 @@
 
 This is a proof of concept for an application that pre-provisions virtual machines in Azure using the .NET SDK. It's meant as a sample, and nothing more. There are hard-coded constants all over the place.
 
+![Azure Pool Instances](vm-instances.png)
+
 There are a couple of things to note:
 
 * There is obviously a cost to keeping extra VMs around
